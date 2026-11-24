@@ -1,0 +1,204 @@
+
+name: MediCore CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and Test MediCore
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18
+
+        env:
+          POSTGRES_USER: medicore
+          POSTGRES_PASSWORD: medicore_ci_db_password
+          POSTGRES_DB: medicore_test
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U medicore -d medicore_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      CI: true
+      NODE_ENV: test
+      PORT: 5000
+      CLIENT_URL: http://localhost:5175
+
+      DATABASE_URL: postgresql://medicore:medicore_ci_db_password@localhost:5432/medicore_test
+
+      PGPASSWORD: medicore_ci_db_password
+
+      VITE_API_URL: http://localhost:5000/api
+
+    steps:
+      # 1. Download repository.
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Install Node.js.
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # 3. Install dependencies.
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          NODE_ENV: development
+
+      # 4. Generate temporary test credentials.
+
+      - name: Generate CI credentials
+        shell: bash
+        run: |
+          ADMIN_PASSWORD=$(openssl rand -hex 24)
+          SESSION_SECRET=$(openssl rand -hex 32)
+
+          echo "::add-mask::$ADMIN_PASSWORD"
+          echo "::add-mask::$SESSION_SECRET"
+
+          echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$GITHUB_ENV"
+          echo "E2E_ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$GITHUB_ENV"
+          echo "SESSION_SECRET=$SESSION_SECRET" >> "$GITHUB_ENV"
+
+      # 5. Check frontend code quality.
+
+      - name: Frontend lint
+        run: npm run lint
+
+      # 6. Check backend TypeScript.
+
+      - name: Backend typecheck
+        run: npm run typecheck
+
+      # 7. Build frontend and backend.
+
+      - name: Build application
+        run: npm run build
+
+      # 8. Build Storybook.
+
+      - name: Build Storybook
+        run: npm run build:storybook
+
+      # 9. Install PostgreSQL client.
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      # 10. Initialise test database.
+
+      - name: Initialise database schema
+        run: |
+          for file in apps/api/sql/*.sql; do
+            echo "Executing $file"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
+          done
+
+      # 11. Create test admin.
+
+      - name: Create test admin
+        run: npm run seed:admin
+
+      # 12. Insert fictional test records.
+
+      - name: Seed test data
+        run: npm run seed:test
+
+      # 13. Install Playwright browser.
+
+      - name: Install Playwright Chromium
+        run: npm exec -w @medicore/web -- playwright install --with-deps chromium
+
+      # 14. Start backend.
+
+      - name: Start backend API
+        run: |
+          npm run start -w @medicore/api > api.log 2>&1 &
+
+      # 15. Start frontend.
+
+      - name: Start frontend
+        run: |
+          npm run dev:web -- --host 0.0.0.0 --port 5175 --strictPort > web.log 2>&1 &
+
+      # 16. Wait for both servers.
+
+      - name: Wait for application
+        shell: bash
+        run: |
+          wait_for_url() {
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent "$1" > /dev/null; then
+                echo "$1 is ready"
+                return 0
+              fi
+              sleep 2
+            done
+
+            echo "Server failed to start: $1"
+            return 1
+          }
+
+          wait_for_url http://localhost:5000/api/health
+          wait_for_url http://localhost:5175
+
+      # 17. Execute Playwright tests.
+
+      - name: Run Playwright tests
+        run: npm run test:e2e -- --workers=1
+
+      # 18. Upload Playwright report.
+
+      - name: Upload Playwright report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # 19. Upload logs when tests fail.
+
+      - name: Upload failure logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: medicore-failure-logs
+          path: |
+            api.log
+            web.log
+            apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

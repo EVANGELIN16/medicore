@@ -1,0 +1,22 @@
+
+{
+  "name": "medicore",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @medicore/web",
+    "dev:api": "npm run dev -w @medicore/api",
+    "build:web": "npm run build -w @medicore/web",
+    "build:api": "npm run build -w @medicore/api",
+    "build": "npm run build:api && npm run build:web",
+    "lint": "npm run lint -w @medicore/web",
+    "typecheck": "npm run typecheck -w @medicore/api",
+    "test:e2e": "npm exec -w @medicore/web -- playwright test",
+    "build:storybook": "npm run build-storybook -w @medicore/web",
+    "seed:admin": "npm run seed:admin -w @medicore/api",
+    "seed:test": "npm run seed:test -w @medicore/api"
+  }
+}
