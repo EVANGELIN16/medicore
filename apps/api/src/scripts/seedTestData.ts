@@ -1,4 +1,3 @@
-
 import { pool } from "../db/pool.js";
 
 async function seedTestData() {
@@ -24,7 +23,7 @@ async function seedTestData() {
   try {
     await client.query("BEGIN");
 
-    // 1. Create a department.
+    // 1. Create a department
 
     const department = await client.query(
       `
@@ -53,7 +52,7 @@ async function seedTestData() {
 
     console.log("Test department created");
 
-    // 2. Create an available doctor.
+    // 2. Create an available doctor
 
     await client.query(
       `
@@ -81,33 +80,51 @@ async function seedTestData() {
 
     console.log("Test doctor created");
 
-    // 3. Create an active patient.
+    // 3. Create an active patient
 
-    await client.query(
+    const existingPatient = await client.query(
       `
-      INSERT INTO patients (
-        name,
-        age,
-        gender,
-        phone,
-        status
-      )
-      SELECT $1, $2, $3, $4, $5
-      WHERE NOT EXISTS (
-        SELECT 1 FROM patients
-        WHERE phone = $4
-      )
+      SELECT id
+      FROM patients
+      WHERE phone = $1
       `,
-      [
-        "Test Patient",
-        30,
-        "Female",
-        "07700900002",
-        "Active",
-      ]
+      ["07700900002"]
     );
 
-    console.log("Test patient created");
+    if (existingPatient.rows.length === 0) {
+      await client.query(
+        `
+        INSERT INTO patients (
+          name,
+          age,
+          gender,
+          phone,
+          status
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          "Test Patient",
+          30,
+          "Female",
+          "07700900002",
+          "Active",
+        ]
+      );
+
+      console.log("Test patient created");
+    } else {
+      await client.query(
+        `
+        UPDATE patients
+        SET status = 'Active'
+        WHERE id = $1
+        `,
+        [existingPatient.rows[0].id]
+      );
+
+      console.log("Test patient already exists");
+    }
 
     await client.query("COMMIT");
 
