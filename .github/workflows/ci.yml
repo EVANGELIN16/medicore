@@ -191,8 +191,8 @@ jobs:
             return 1
           }
 
-          wait_for_url http://localhost:5000/api/health
-          wait_for_url http://localhost:5175
+          wait_for_url http://127.0.0.1:5000/
+          wait_for_url http://127.0.0.1:5175/
 
           echo "Both application servers are ready."
 
